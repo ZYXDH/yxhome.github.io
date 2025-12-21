@@ -1,0 +1,79 @@
+
+name: Update Google Scholar Stats
+
+on:
+  schedule:
+    # 每天 UTC 时间 0:00 运行一次 (北京时间早上 8:00)
+    - cron: "0 0 * * *"
+  workflow_dispatch: # 允许手动点击按钮触发
+
+jobs:
+  update-scholar-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          pip install scholarly requests
+
+      - name: Update Gist
+        env:
+          # 请修改下面两行配置
+          SCHOLAR_ID: "ShAefLUAAAAJ"  # 替换为您的 Google Scholar ID
+          GIST_ID: "3ffc25cc308f54cb2aa77e193fa2b6af"        # 替换为您的 Gist ID
+          GH_TOKEN: ${{ secrets.GH_TOKEN }} # 对应刚才设置的 Secret Name
+        run: |
+          python -c "
+          import os
+          import json
+          import requests
+          from scholarly import scholarly
+
+          # 1. 获取 Scholar 数据
+          try:
+              author = scholarly.search_author_id(os.environ['SCHOLAR_ID'])
+              scholarly.fill(author, sections=['indices'])
+              citations = author.get('citedby', 0)
+              print(f'Found {citations} citations.')
+          except Exception as e:
+              print(f'Error fetching scholar data: {e}')
+              exit(1)
+
+          # 2. 构造 Shields.io JSON
+          content = {
+              'schemaVersion': 1,
+              'label': 'Citations',
+              'message': str(citations),
+              'color': 'orange',
+              'cacheSeconds': 3600
+          }
+
+          # 3. 更新 Gist
+          gist_id = os.environ['GIST_ID']
+          token = os.environ['GH_TOKEN']
+          filename = 'scholar.json'
+
+          headers = {
+              'Authorization': f'token {token}',
+              'Accept': 'application/vnd.github.v3+json'
+          }
+          
+          data = {
+              'files': {
+                  filename: {
+                      'content': json.dumps(content)
+                  }
+              }
+          }
+
+          r = requests.patch(f'https://api.github.com/gists/{gist_id}', headers=headers, json=data)
+          if r.status_code == 200:
+              print('Gist updated successfully!')
+          else:
+              print(f'Failed to update Gist: {r.status_code} {r.text}')
+              exit(1)
+          "
