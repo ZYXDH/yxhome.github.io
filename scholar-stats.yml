@@ -1,11 +1,9 @@
-
 name: Update Google Scholar Stats
 
 on:
   schedule:
-    # 每天 UTC 时间 0:00 运行一次 (北京时间早上 8:00)
     - cron: "0 0 * * *"
-  workflow_dispatch: # 允许手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   update-scholar-stats:
@@ -22,21 +20,30 @@ jobs:
 
       - name: Update Gist
         env:
-          # 请修改下面两行配置
-          SCHOLAR_ID: "ShAefLUAAAAJ"  # 替换为您的 Google Scholar ID
-          GIST_ID: "3ffc25cc308f54cb2aa77e193fa2b6af"        # 替换为您的 Gist ID
-          GH_TOKEN: ${{ secrets.GH_TOKEN }} # 对应刚才设置的 Secret Name
+          SCHOLAR_ID: "ShAefLUAAAAJ"
+          GIST_ID: "3ffc25cc308f54cb2aa77e193fa2b6af"
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           python -c "
           import os
           import json
           import requests
           from scholarly import scholarly
+          import time
+
+          # --- 修改开始：启用免费代理 ---
+          print('Setting up proxy...')
+          scholarly.use_proxy('free')
+          # --- 修改结束 ---
 
           # 1. 获取 Scholar 数据
           try:
+              print(f'Searching for author: {os.environ[\"SCHOLAR_ID\"]}')
               author = scholarly.search_author_id(os.environ['SCHOLAR_ID'])
+              
+              # 填充数据
               scholarly.fill(author, sections=['indices'])
+              
               citations = author.get('citedby', 0)
               print(f'Found {citations} citations.')
           except Exception as e:
