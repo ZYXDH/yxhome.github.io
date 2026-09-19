@@ -1,10 +1,8 @@
 name: Update Google Scholar Stats
-
 on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
-
 jobs:
   update-scholar-stats:
     runs-on: ubuntu-latest
@@ -12,12 +10,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.x"
-
+          python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install scholarly requests
-
+          pip install scholarly requests "bibtexparser<2.0"
       - name: Update Gist
         env:
           SCHOLAR_ID: "ShAefLUAAAAJ"
@@ -30,12 +26,10 @@ jobs:
           import requests
           from scholarly import scholarly
           import time
-
           # --- 修改开始：启用免费代理 ---
           print('Setting up proxy...')
           scholarly.use_proxy('free')
           # --- 修改结束 ---
-
           # 1. 获取 Scholar 数据
           try:
               print(f'Searching for author: {os.environ[\"SCHOLAR_ID\"]}')
@@ -49,7 +43,6 @@ jobs:
           except Exception as e:
               print(f'Error fetching scholar data: {e}')
               exit(1)
-
           # 2. 构造 Shields.io JSON
           content = {
               'schemaVersion': 1,
@@ -58,12 +51,10 @@ jobs:
               'color': 'orange',
               'cacheSeconds': 3600
           }
-
           # 3. 更新 Gist
           gist_id = os.environ['GIST_ID']
           token = os.environ['GH_TOKEN']
           filename = 'scholar.json'
-
           headers = {
               'Authorization': f'token {token}',
               'Accept': 'application/vnd.github.v3+json'
@@ -76,7 +67,6 @@ jobs:
                   }
               }
           }
-
           r = requests.patch(f'https://api.github.com/gists/{gist_id}', headers=headers, json=data)
           if r.status_code == 200:
               print('Gist updated successfully!')
