@@ -1,76 +1,98 @@
 name: Update Google Scholar Stats
+
 on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
+
 jobs:
   update-scholar-stats:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install dependencies
         run: |
-          pip install scholarly requests "bibtexparser<2.0"
+          python -m pip install --upgrade pip
+          # scholarly 仍使用 bibtexparser 1.x API；2.x 会报
+          # ModuleNotFoundError: No module named 'bibtexparser.bibdatabase'
+          # scholarly 1.7.x 也不兼容 httpx 0.28+ 的 proxy 参数
+          pip install \
+            "scholarly==1.7.11" \
+            "bibtexparser==1.4.3" \
+            "httpx==0.27.2" \
+            "requests"
+          python -c "import bibtexparser, scholarly, httpx; print('bibtexparser', bibtexparser.__version__); print('httpx', httpx.__version__)"
+
       - name: Update Gist
         env:
           SCHOLAR_ID: "ShAefLUAAAAJ"
           GIST_ID: "3ffc25cc308f54cb2aa77e193fa2b6af"
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          python -c "
+          python << 'PY'
           import os
           import json
-          import requests
-          from scholarly import scholarly
           import time
-          # --- 修改开始：启用免费代理 ---
-          print('Setting up proxy...')
-          scholarly.use_proxy('free')
-          # --- 修改结束 ---
-          # 1. 获取 Scholar 数据
-          try:
-              print(f'Searching for author: {os.environ[\"SCHOLAR_ID\"]}')
-              author = scholarly.search_author_id(os.environ['SCHOLAR_ID'])
-              
-              # 填充数据
-              scholarly.fill(author, sections=['indices'])
-              
-              citations = author.get('citedby', 0)
-              print(f'Found {citations} citations.')
-          except Exception as e:
-              print(f'Error fetching scholar data: {e}')
-              exit(1)
-          # 2. 构造 Shields.io JSON
-          content = {
-              'schemaVersion': 1,
-              'label': 'Citations',
-              'message': str(citations),
-              'color': 'orange',
-              'cacheSeconds': 3600
-          }
-          # 3. 更新 Gist
-          gist_id = os.environ['GIST_ID']
-          token = os.environ['GH_TOKEN']
-          filename = 'scholar.json'
-          headers = {
-              'Authorization': f'token {token}',
-              'Accept': 'application/vnd.github.v3+json'
-          }
-          
-          data = {
-              'files': {
-                  filename: {
-                      'content': json.dumps(content)
-                  }
-              }
-          }
-          r = requests.patch(f'https://api.github.com/gists/{gist_id}', headers=headers, json=data)
-          if r.status_code == 200:
-              print('Gist updated successfully!')
+          import requests
+          from scholarly import ProxyGenerator, scholarly
+
+          scholar_id = os.environ["SCHOLAR_ID"]
+          gist_id = os.environ["GIST_ID"]
+          token = os.environ.get("GH_TOKEN")
+          if not token:
+              raise SystemExit("Missing GH_TOKEN secret")
+
+          print("Setting up proxy...")
+          pg = ProxyGenerator()
+          if pg.FreeProxies():
+              scholarly.use_proxy(pg)
+              print("Free proxy enabled")
           else:
-              print(f'Failed to update Gist: {r.status_code} {r.text}')
-              exit(1)
-          "
+              print("Free proxy unavailable, continuing without proxy")
+
+          citations = None
+          last_error = None
+          for attempt in range(1, 4):
+              try:
+                  print(f"Searching for author: {scholar_id} (attempt {attempt})")
+                  author = scholarly.search_author_id(scholar_id)
+                  scholarly.fill(author, sections=["indices"])
+                  citations = author.get("citedby", 0)
+                  print(f"Found {citations} citations.")
+                  break
+              except Exception as e:
+                  last_error = e
+                  print(f"Error fetching scholar data: {e}")
+                  time.sleep(5 * attempt)
+
+          if citations is None:
+              raise SystemExit(f"Failed to fetch scholar data: {last_error}")
+
+          content = {
+              "schemaVersion": 1,
+              "label": "Citations",
+              "message": str(citations),
+              "color": "orange",
+              "cacheSeconds": 3600,
+          }
+
+          headers = {
+              "Authorization": f"token {token}",
+              "Accept": "application/vnd.github.v3+json",
+          }
+          data = {"files": {"scholar.json": {"content": json.dumps(content)}}}
+          r = requests.patch(
+              f"https://api.github.com/gists/{gist_id}",
+              headers=headers,
+              json=data,
+              timeout=30,
+          )
+          if r.status_code == 200:
+              print("Gist updated successfully!")
+          else:
+              raise SystemExit(f"Failed to update Gist: {r.status_code} {r.text}")
+          PY
